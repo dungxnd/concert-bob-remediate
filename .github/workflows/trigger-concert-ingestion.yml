@@ -14,15 +14,28 @@ jobs:
       - name: Trigger Concert Ingestion API
         env:
           CONCERT_API_KEY: ${{ secrets.CONCERT_API_KEY }}
-          INSTANCE_ID: ${{ secrets.CONCERT_INSTANCE_ID || '0000-0000-0000-0000' }}
-          CONCERT_URL: ${{ vars.CONCERT_HOSTNAME || 'https://162.133.134.251:12443' }}
+          INSTANCE_ID: ${{ secrets.CONCERT_INSTANCE_ID || vars.CONCERT_INSTANCE_ID || '0000-0000-0000-0000' }}
+          CONCERT_URL: ${{ vars.CONCERT_HOSTNAME || secrets.CONCERT_HOSTNAME || 'https://162.133.134.251:12443' }}
+          # API path prefix, same as upload-sbom-to-concert.yml ("none" for no prefix).
+          API_PREFIX: ${{ vars.CONCERT_API_PREFIX || '/concert' }}
+          # This job previously always used curl -k, so TLS verification stays
+          # off unless CONCERT_INSECURE_TLS is set to "false".
+          INSECURE_TLS: ${{ vars.CONCERT_INSECURE_TLS || 'true' }}
           JOB_ID: ${{ vars.INGESTION_JOB_ID || '92073c05-78c1-4f1b-8408-89ed1341a592' }}
         run: |
           echo "Triggering Concert ingestion job..."
           echo "Job ID: ${JOB_ID}"
-          
-          RESPONSE=$(curl -k --request POST \
-            --url ${CONCERT_URL}/ingestion/api/v1/job/v2/submit \
+
+          [ "${API_PREFIX}" = "none" ] && API_PREFIX=""
+          SUBMIT_URL="${CONCERT_URL%/}${API_PREFIX}/ingestion/api/v1/job/v2/submit"
+
+          CURL_TLS=()
+          if [ "${INSECURE_TLS}" = "true" ]; then
+            CURL_TLS=(-k)
+          fi
+
+          RESPONSE=$(curl "${CURL_TLS[@]}" --request POST \
+            --url "${SUBMIT_URL}" \
             --header "Authorization: ${CONCERT_API_KEY}" \
             --header "InstanceId: ${INSTANCE_ID}" \
             --header 'accept: application/json' \
