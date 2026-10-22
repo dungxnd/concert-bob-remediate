@@ -148,7 +148,8 @@ The `Upload credit-app SBOM to Concert` workflow (`.github/workflows/upload-sbom
 
 1. Generates a CycloneDX 1.6 package SBOM with `cyclonedx-maven-plugin` (no change to `pom.xml`).
 2. Generates a ConcertDef 2.0.0 application SBOM (`credit-app`, version read from the POM, code component = this repository and branch).
-3. Uploads both to `POST {CONCERT_HOSTNAME}/concert/ingestion/api/v1/upload_files` as `application_sbom` and `package_sbom` (metadata: `repo_url`, `repo_name`, `branch_name`). The `/concert` prefix can be changed with the variable `CONCERT_API_PREFIX` (`none` for no prefix).
+3. Scans the package SBOM with Grype (`anchore/scan-action`) and writes the CVE findings as CycloneDX JSON. Concert does not match package SBOMs against advisories on its own, so this scan is what produces the CVE findings (for example for Struts 2.3.31). Findings never fail the job.
+4. Uploads to `POST {CONCERT_HOSTNAME}/concert/ingestion/api/v1/upload_files`, in this order: `application_sbom`, `package_sbom` (metadata: `repo_url`, `repo_name`, `branch_name`) and `code_scan` (the Grype scan; metadata: `scanner_name`, `repo_url`, `branch_name`, `application_name`, `application_version`). The `/concert` prefix can be changed with the variable `CONCERT_API_PREFIX` (`none` for no prefix).
 
 `CONCERT_HOSTNAME` must be set as a repository **variable** (Settings > Secrets and variables > Actions > Variables) in the repository that runs the workflow, including forks.
 

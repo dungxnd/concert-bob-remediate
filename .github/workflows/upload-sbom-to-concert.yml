@@ -1,9 +1,11 @@
 name: Upload credit-app SBOM to Concert
 
-# Generates a CycloneDX package SBOM and a ConcertDef application SBOM for
-# app/credit-app and uploads both to IBM Concert 3.x through the ingestion API:
-#   POST {CONCERT_HOSTNAME}/ingestion/api/v1/upload_files
-# Docs: https://www.ibm.com/docs/en/concert/3.1.x?topic=api-uploading-data-through
+# Generates a CycloneDX package SBOM, a ConcertDef application SBOM and a Grype
+# vulnerability scan for app/credit-app and uploads them to IBM Concert 3.x
+# through the ingestion API:
+#   POST {CONCERT_HOSTNAME}{API_PREFIX}/ingestion/api/v1/upload_files
+# API_PREFIX defaults to /concert (see the upload step).
+# Docs: https://www.ibm.com/docs/en/SSQNYH_3.1.x/doc/ingesting_data_via_api.html
 
 on:
   push:
@@ -62,8 +64,13 @@ jobs:
           # repository name). The plugin names the root component after the Maven
           # artifactId (credit-app), so rename it to match the registered name.
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          jq --arg n "${REPO_NAME}" '.metadata.component.name = $n' target/bom.json > target/bom.tmp
+          # Concert requires serialNumber and version in the package SBOM; add them
+          # only if the plugin did not emit them.
+          jq --arg n "${REPO_NAME}" --arg u "urn:uuid:$(cat /proc/sys/kernel/random/uuid)" \
+            '.metadata.component.name = $n | .serialNumber //= $u | .version //= 1' \
+            target/bom.json > target/bom.tmp
           mv target/bom.tmp target/bom.json
+          echo "serialNumber/version: $(jq -c '{serialNumber, version}' target/bom.json)"
           echo "Root component: $(jq -c '.metadata.component | {type, name, version}' target/bom.json)"
           echo "Components in package SBOM: $(jq '.components | length' target/bom.json)"
 
@@ -121,6 +128,26 @@ jobs:
             }' > target/concertdef-application-sbom.json
 
           echo "Application: ${APP_NAME} ${APP_VERSION}"
+
+      # Concert does not match package SBOMs against advisories itself; CVE findings
+      # come from an uploaded vulnerability scan. Grype scans the package SBOM and
+      # writes CycloneDX JSON, which Concert accepts as a source code scan (code_scan).
+      - name: Scan package SBOM for vulnerabilities (Grype)
+        id: grype
+        uses: anchore/scan-action@v7
+        with:
+          sbom: ${{ env.APP_DIR }}/target/bom.json
+          output-format: cyclonedx-json
+          output-file: ${{ env.APP_DIR }}/target/grype-vulnerabilities.cdx.json
+          # Findings are reported to Concert, they must not fail this job.
+          fail-build: 'false'
+
+      - name: Log vulnerability scan result
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          test -s target/grype-vulnerabilities.cdx.json
+          echo "Vulnerabilities found: $(jq '(.vulnerabilities // []) | length' target/grype-vulnerabilities.cdx.json)"
+          jq -r '(.vulnerabilities // [])[] | "\(.id) \(.affects[0].ref // "")"' target/grype-vulnerabilities.cdx.json | head -n 20
 
       - name: Upload SBOMs to Concert
         working-directory: ${{ env.APP_DIR }}
@@ -192,21 +219,31 @@ jobs:
           # 1. Define / update the application (ConcertDef SBOMs use data_type=application_sbom).
           upload application_sbom target/concertdef-application-sbom.json
 
-          # 2. Upload the CycloneDX package SBOM. Source SBOMs require repo_url and repo_name.
-          # application_name / application_version are passed explicitly because
-          # Concert rejects the upload when several applications reference the same
-          # repository URL ("Specify the application name and version explicitly").
+          # 2. Upload the CycloneDX package SBOM. The documented metadata for a source
+          # package SBOM is repo_url and repo_name (required), branch_name (optional).
+          # If Concert answers "Multiple applications reference the same source
+          # repository", delete the duplicate application in Concert instead of
+          # working around it here.
           APP_VERSION=$(jq -r '.metadata."application-version"' target/concertdef-application-sbom.json)
           METADATA=$(jq -nc \
             --arg repo_url "${REPO_URL}" \
             --arg repo_name "${GITHUB_REPOSITORY#*/}" \
             --arg branch "${BRANCH}" \
-            --arg app_name "${APP_NAME}" \
-            --arg app_version "${APP_VERSION}" \
-            '{repo_url: $repo_url, repo_name: $repo_name, branch_name: $branch,
-              application_name: $app_name, application_version: $app_version}')
+            '{repo_url: $repo_url, repo_name: $repo_name, branch_name: $branch}')
           echo "Package SBOM metadata: ${METADATA}"
           upload package_sbom target/bom.json "${METADATA}"
+
+          # 3. Upload the vulnerability scan (CVE findings) after the repository is
+          # linked to the application. code_scan requires repo_url.
+          SCAN_METADATA=$(jq -nc \
+            --arg repo_url "${REPO_URL}" \
+            --arg branch "${BRANCH}" \
+            --arg app_name "${APP_NAME}" \
+            --arg app_version "${APP_VERSION}" \
+            '{scanner_name: "grype", repo_url: $repo_url, branch_name: $branch,
+              application_name: $app_name, application_version: $app_version}')
+          echo "Vulnerability scan metadata: ${SCAN_METADATA}"
+          upload code_scan target/grype-vulnerabilities.cdx.json "${SCAN_METADATA}"
 
       - name: Keep SBOMs as build artifacts
         if: always()
@@ -216,6 +253,7 @@ jobs:
           path: |
             ${{ env.APP_DIR }}/target/bom.json
             ${{ env.APP_DIR }}/target/concertdef-application-sbom.json
+            ${{ env.APP_DIR }}/target/grype-vulnerabilities.cdx.json
           if-no-files-found: warn
 
       - name: Job summary
