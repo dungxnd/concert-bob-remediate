@@ -21,7 +21,7 @@ jobs:
           # This job previously always used curl -k, so TLS verification stays
           # off unless CONCERT_INSECURE_TLS is set to "false".
           INSECURE_TLS: ${{ vars.CONCERT_INSECURE_TLS || 'true' }}
-          JOB_ID: ${{ vars.INGESTION_JOB_ID || '92073c05-78c1-4f1b-8408-89ed1341a592' }}
+          JOB_ID: ${{ vars.INGESTION_JOB_ID || 'b1818e95-0749-4b6c-b463-3155139ed992' }}
         run: |
           echo "Triggering Concert ingestion job..."
           echo "Job ID: ${JOB_ID}"

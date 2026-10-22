@@ -152,7 +152,7 @@ The `Upload credit-app SBOM to Concert` workflow (`.github/workflows/upload-sbom
 
 `CONCERT_HOSTNAME` must be set as a repository **variable** (Settings > Secrets and variables > Actions > Variables) in the repository that runs the workflow, including forks.
 
-It uses the existing `CONCERT_API_KEY` secret and `CONCERT_HOSTNAME` / `CONCERT_INSTANCE_ID` settings. Optionally set the variable `CONCERT_INSECURE_TLS=true` if the Concert instance uses a self-signed certificate. For OpenShift deployments the `CONCERT_API_KEY` value must start with `ZenApiKey` instead of `C_API_KEY`.
+It uses the existing `CONCERT_API_KEY` secret and `CONCERT_HOSTNAME` / `CONCERT_INSTANCE_ID` settings. TLS verification is skipped by default (self-signed certificate); set the variable `CONCERT_INSECURE_TLS=false` to enforce it. For OpenShift deployments the `CONCERT_API_KEY` value must start with `ZenApiKey` instead of `C_API_KEY`.
 
 
 

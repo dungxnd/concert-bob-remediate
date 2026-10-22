@@ -119,9 +119,10 @@ jobs:
           # Set the variable CONCERT_API_PREFIX to override (use a single space-free
           # value such as "/concert", or "none" for no prefix).
           API_PREFIX: ${{ vars.CONCERT_API_PREFIX || '/concert' }}
-          # Set the repository variable CONCERT_INSECURE_TLS=true only for
-          # instances that use a self-signed certificate.
-          INSECURE_TLS: ${{ vars.CONCERT_INSECURE_TLS }}
+          # Skips TLS verification (curl -k) because the Concert instance uses a
+          # self-signed certificate, same as trigger-concert-ingestion.yml.
+          # Set the repository variable CONCERT_INSECURE_TLS=false to enforce verification.
+          INSECURE_TLS: ${{ vars.CONCERT_INSECURE_TLS || 'true' }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
         run: |
