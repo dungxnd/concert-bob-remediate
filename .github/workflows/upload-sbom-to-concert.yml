@@ -193,11 +193,19 @@ jobs:
           upload application_sbom target/concertdef-application-sbom.json
 
           # 2. Upload the CycloneDX package SBOM. Source SBOMs require repo_url and repo_name.
+          # application_name / application_version are passed explicitly because
+          # Concert rejects the upload when several applications reference the same
+          # repository URL ("Specify the application name and version explicitly").
+          APP_VERSION=$(jq -r '.metadata."application-version"' target/concertdef-application-sbom.json)
           METADATA=$(jq -nc \
             --arg repo_url "${REPO_URL}" \
             --arg repo_name "${GITHUB_REPOSITORY#*/}" \
             --arg branch "${BRANCH}" \
-            '{repo_url: $repo_url, repo_name: $repo_name, branch_name: $branch}')
+            --arg app_name "${APP_NAME}" \
+            --arg app_version "${APP_VERSION}" \
+            '{repo_url: $repo_url, repo_name: $repo_name, branch_name: $branch,
+              application_name: $app_name, application_version: $app_version}')
+          echo "Package SBOM metadata: ${METADATA}"
           upload package_sbom target/bom.json "${METADATA}"
 
       - name: Keep SBOMs as build artifacts
