@@ -1,6 +1,6 @@
 name: Upload credit-app SBOM to Concert
 
-# Generates a CycloneDX package SBOM, a ConcertDef application SBOM and a Grype
+# Generates a CycloneDX package SBOM, a ConcertDef application SBOM and a Trivy
 # vulnerability scan for app/credit-app and uploads them to IBM Concert 3.x
 # through the ingestion API:
 #   POST {CONCERT_HOSTNAME}{API_PREFIX}/ingestion/api/v1/upload_files
@@ -132,24 +132,28 @@ jobs:
           echo "Application: ${APP_NAME} ${APP_VERSION}"
 
       # Concert does not match package SBOMs against advisories itself; CVE findings
-      # come from an uploaded vulnerability scan. Grype scans the package SBOM and
-      # writes CycloneDX JSON, which Concert accepts as a source code scan (code_scan).
-      - name: Scan package SBOM for vulnerabilities (Grype)
-        id: grype
-        uses: anchore/scan-action@v7
+      # come from an uploaded vulnerability scan. Concert's source code scan sample
+      # (IBM/Concert use-case-data-files/*/vulnerabilities/code_scan/
+      # code_scan_cyclonedx_sample.json) is a Trivy CycloneDX VDR, and the docs say
+      # the file must match that structure and must not be edited. A Grype CycloneDX
+      # file has a different structure (no metadata.component, no dependencies) and
+      # was rejected with "Error processing", so the scan is done with Trivy.
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.3.1
         with:
-          sbom: ${{ env.APP_DIR }}/target/bom.json
-          output-format: cyclonedx-json
-          output-file: ${{ env.APP_DIR }}/target/grype-vulnerabilities.cdx.json
-          # Findings are reported to Concert, they must not fail this job.
-          fail-build: 'false'
+          version: v0.76.1
 
-      - name: Log vulnerability scan result
+      - name: Scan package SBOM for vulnerabilities (Trivy)
         working-directory: ${{ env.APP_DIR }}
         run: |
-          test -s target/grype-vulnerabilities.cdx.json
-          echo "Vulnerabilities found: $(jq '(.vulnerabilities // []) | length' target/grype-vulnerabilities.cdx.json)"
-          jq -r '(.vulnerabilities // [])[] | "\(.id) \(.affects[0].ref // "")"' target/grype-vulnerabilities.cdx.json | head -n 20
+          # Exit code is 0 even when vulnerabilities are found: findings are reported
+          # to Concert, they must not fail this job. The output is not modified.
+          trivy sbom --scanners vuln --format cyclonedx \
+            --output target/trivy-vulnerabilities.cdx.json target/bom.json
+          test -s target/trivy-vulnerabilities.cdx.json
+          echo "Top-level keys: $(jq -c 'keys' target/trivy-vulnerabilities.cdx.json)"
+          echo "Vulnerabilities found: $(jq '(.vulnerabilities // []) | length' target/trivy-vulnerabilities.cdx.json)"
+          jq -r '(.vulnerabilities // [])[] | "\(.id) \(.affects[0].ref // "")"' target/trivy-vulnerabilities.cdx.json | head -n 20
 
       - name: Upload SBOMs to Concert
         working-directory: ${{ env.APP_DIR }}
@@ -246,10 +250,10 @@ jobs:
             --arg branch "${BRANCH}" \
             --arg app_name "${APP_NAME}" \
             --arg app_version "${APP_VERSION}" \
-            '{scanner_name: "grype", repo_url: $repo_url, branch_name: $branch,
+            '{scanner_name: "trivy", repo_url: $repo_url, branch_name: $branch,
               application_name: $app_name, application_version: $app_version}')
           echo "Vulnerability scan metadata: ${SCAN_METADATA}"
-          upload code_scan target/grype-vulnerabilities.cdx.json "${SCAN_METADATA}"
+          upload code_scan target/trivy-vulnerabilities.cdx.json "${SCAN_METADATA}"
 
       - name: Keep SBOMs as build artifacts
         if: always()
@@ -259,7 +263,7 @@ jobs:
           path: |
             ${{ env.APP_DIR }}/target/bom.json
             ${{ env.APP_DIR }}/target/concertdef-application-sbom.json
-            ${{ env.APP_DIR }}/target/grype-vulnerabilities.cdx.json
+            ${{ env.APP_DIR }}/target/trivy-vulnerabilities.cdx.json
           if-no-files-found: warn
 
       - name: Job summary
