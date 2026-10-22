@@ -86,8 +86,8 @@ jobs:
         run: |
           cat > .env << EOF
           CONCERT_API_KEY="${{ secrets.CONCERT_API_KEY }}"
-          CONCERT_HOSTNAME="${{ vars.CONCERT_HOSTNAME }}"
-          CONCERT_INSTANCE_ID="${{ vars.CONCERT_INSTANCE_ID }}"
+          CONCERT_HOSTNAME="${{ vars.CONCERT_HOSTNAME || secrets.CONCERT_HOSTNAME }}"
+          CONCERT_INSTANCE_ID="${{ secrets.CONCERT_INSTANCE_ID || vars.CONCERT_INSTANCE_ID }}"
           EOF
           echo "✅ Concert API credentials configured"
       
@@ -370,8 +370,8 @@ jobs:
         run: |
           cat > .env << EOF
           CONCERT_API_KEY="${{ secrets.CONCERT_API_KEY }}"
-          CONCERT_HOSTNAME="${{ vars.CONCERT_HOSTNAME }}"
-          CONCERT_INSTANCE_ID="${{ vars.CONCERT_INSTANCE_ID }}"
+          CONCERT_HOSTNAME="${{ vars.CONCERT_HOSTNAME || secrets.CONCERT_HOSTNAME }}"
+          CONCERT_INSTANCE_ID="${{ secrets.CONCERT_INSTANCE_ID || vars.CONCERT_INSTANCE_ID }}"
           EOF
           echo "✅ Concert API credentials configured"
 
@@ -835,8 +835,8 @@ jobs:
         run: |
           cat > .env << EOF
           CONCERT_API_KEY="${{ secrets.CONCERT_API_KEY }}"
-          CONCERT_HOSTNAME="${{ vars.CONCERT_HOSTNAME }}"
-          CONCERT_INSTANCE_ID="${{ vars.CONCERT_INSTANCE_ID }}"
+          CONCERT_HOSTNAME="${{ vars.CONCERT_HOSTNAME || secrets.CONCERT_HOSTNAME }}"
+          CONCERT_INSTANCE_ID="${{ secrets.CONCERT_INSTANCE_ID || vars.CONCERT_INSTANCE_ID }}"
           EOF
           echo "✅ Concert API credentials configured"
       
