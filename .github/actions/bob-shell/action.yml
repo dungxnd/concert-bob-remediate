@@ -30,7 +30,10 @@ inputs:
     required: false
     default: 'You are a helpful assistant.'
   chat_mode:
-    description: 'The chat mode slug to use (e.g., "devops-concert", "vuln-remediation-concert"). Passed to Bob Shell `--chat-mode` argument.'
+    description: 'The mode slug to use (e.g., "devops-concert", "vuln-remediation-concert"). Passed to `bob run --mode`.'
+    required: false
+  team_id:
+    description: 'Optional team ID passed to `bob run --team-id`. Required when the API key type is "general".'
     required: false
   settings:
     description: 'A JSON string written to `.bob/settings.json` to configure Bob Shell project settings.'
@@ -135,22 +138,28 @@ runs:
         # Keep track of whether we've failed
         FAILED=false
 
-        # Build Bob Shell command with optional chat mode
-        BOB_CMD="bob --auth-method api-key --accept-license --yolo"
+        # Build the Bob Shell 2.x non-interactive command (`bob run`).
+        # Authentication uses the BOB_API_KEY environment variable; all tools
+        # are pre-approved in `bob run`, so no --yolo/--auth-method flags.
+        BOB_ARGS=(run --accept-license)
         if [[ -n "${CHAT_MODE:-}" ]]; then
-          BOB_CMD="${BOB_CMD} --chat-mode=${CHAT_MODE}"
-          echo "Using chat mode: ${CHAT_MODE}"
+          BOB_ARGS+=(--mode "${CHAT_MODE}")
+          echo "Using mode: ${CHAT_MODE}"
         fi
-        BOB_CMD="${BOB_CMD} \"${PROMPT}\""
-        
+        if [[ -n "${TEAM_ID:-}" ]]; then
+          BOB_ARGS+=(--team-id "${TEAM_ID}")
+        fi
+
+        # The prompt is piped via stdin to avoid shell quoting problems with
+        # large multi-line prompts.
         # Run Bob Shell with the provided prompt, streaming responses in debug
         if [[ "${DEBUG}" = true ]]; then
           echo "::warning::Bob Shell debug logging is enabled. This will stream responses, which could reveal sensitive information if processed with untrusted inputs."
-          if ! { eval ${BOB_CMD} 2> >(tee "${TEMP_STDERR}" >&2) | tee "${TEMP_STDOUT}"; }; then
+          if ! { printf '%s' "${PROMPT}" | bob "${BOB_ARGS[@]}" 2> >(tee "${TEMP_STDERR}" >&2) | tee "${TEMP_STDOUT}"; }; then
             FAILED=true
           fi
         else
-          if ! eval ${BOB_CMD} 2> "${TEMP_STDERR}" 1> "${TEMP_STDOUT}"; then
+          if ! printf '%s' "${PROMPT}" | bob "${BOB_ARGS[@]}" 2> "${TEMP_STDERR}" 1> "${TEMP_STDOUT}"; then
             FAILED=true
           fi
         fi
@@ -206,7 +215,9 @@ runs:
         fi
       env:
         DEBUG: '${{ fromJSON(inputs.bobshell_debug || false) }}'
+        BOB_API_KEY: '${{ inputs.bobshell_api_key }}'
         BOBSHELL_API_KEY: '${{ inputs.bobshell_api_key }}'
+        TEAM_ID: '${{ inputs.team_id }}'
         PROMPT: '${{ inputs.prompt }}'
         CHAT_MODE: '${{ inputs.chat_mode }}'
         SETTINGS: '${{ inputs.settings }}'
