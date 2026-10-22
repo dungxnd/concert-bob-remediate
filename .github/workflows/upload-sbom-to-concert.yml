@@ -64,10 +64,12 @@ jobs:
           # repository name). The plugin names the root component after the Maven
           # artifactId (credit-app), so rename it to match the registered name.
           REPO_NAME="${GITHUB_REPOSITORY#*/}"
-          # Concert requires serialNumber and version in the package SBOM; add them
-          # only if the plugin did not emit them.
+          # Concert requires a serialNumber + version combination that it has not
+          # seen before. The plugin derives serialNumber from the project coordinates,
+          # so it is identical on every run and Concert rejects the second upload
+          # ("serial number ... version '1' already exists"). Use a fresh serial per run.
           jq --arg n "${REPO_NAME}" --arg u "urn:uuid:$(cat /proc/sys/kernel/random/uuid)" \
-            '.metadata.component.name = $n | .serialNumber //= $u | .version //= 1' \
+            '.metadata.component.name = $n | .serialNumber = $u | .version = 1' \
             target/bom.json > target/bom.tmp
           mv target/bom.tmp target/bom.json
           echo "serialNumber/version: $(jq -c '{serialNumber, version}' target/bom.json)"
@@ -219,17 +221,21 @@ jobs:
           # 1. Define / update the application (ConcertDef SBOMs use data_type=application_sbom).
           upload application_sbom target/concertdef-application-sbom.json
 
-          # 2. Upload the CycloneDX package SBOM. The documented metadata for a source
-          # package SBOM is repo_url and repo_name (required), branch_name (optional).
-          # If Concert answers "Multiple applications reference the same source
-          # repository", delete the duplicate application in Concert instead of
-          # working around it here.
+          # 2. Upload the CycloneDX package SBOM. Documented metadata for a source
+          # package SBOM: repo_url and repo_name (required), branch_name (optional).
+          # application_name / application_version are not listed for package SBOMs
+          # in the docs, but Concert's error "Multiple applications reference the
+          # same source repository ... Specify the application name and version
+          # explicitly in the request" asks for them, so they are sent as well.
           APP_VERSION=$(jq -r '.metadata."application-version"' target/concertdef-application-sbom.json)
           METADATA=$(jq -nc \
             --arg repo_url "${REPO_URL}" \
             --arg repo_name "${GITHUB_REPOSITORY#*/}" \
             --arg branch "${BRANCH}" \
-            '{repo_url: $repo_url, repo_name: $repo_name, branch_name: $branch}')
+            --arg app_name "${APP_NAME}" \
+            --arg app_version "${APP_VERSION}" \
+            '{repo_url: $repo_url, repo_name: $repo_name, branch_name: $branch,
+              application_name: $app_name, application_version: $app_version}')
           echo "Package SBOM metadata: ${METADATA}"
           upload package_sbom target/bom.json "${METADATA}"
 
