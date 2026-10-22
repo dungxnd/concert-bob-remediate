@@ -68,11 +68,16 @@ jobs:
           # seen before. The plugin derives serialNumber from the project coordinates,
           # so it is identical on every run and Concert rejects the second upload
           # ("serial number ... version '1' already exists"). Use a fresh serial per run.
+          # Concert also rejects an SBOM whose metadata.timestamp is not newer than the
+          # one it already holds for the entity ("a newer SBOM already exists"), so the
+          # timestamp is set explicitly to the current UTC time on every run.
           jq --arg n "${REPO_NAME}" --arg u "urn:uuid:$(cat /proc/sys/kernel/random/uuid)" \
-            '.metadata.component.name = $n | .serialNumber = $u | .version = 1' \
+            --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '.metadata.component.name = $n | .serialNumber = $u | .version = 1 | .metadata.timestamp = $ts' \
             target/bom.json > target/bom.tmp
           mv target/bom.tmp target/bom.json
           echo "serialNumber/version: $(jq -c '{serialNumber, version}' target/bom.json)"
+          echo "Package SBOM metadata.timestamp: $(jq -r '.metadata.timestamp' target/bom.json)"
           echo "Root component: $(jq -c '.metadata.component | {type, name, version}' target/bom.json)"
           echo "Components in package SBOM: $(jq '.components | length' target/bom.json)"
 
@@ -152,7 +157,15 @@ jobs:
             --output target/trivy-vulnerabilities.cdx.json target/bom.json
           test -s target/trivy-vulnerabilities.cdx.json
           echo "Package SBOM timestamp: $(jq -r '.metadata.timestamp' target/bom.json)"
-          echo "Trivy scan timestamp:   $(jq -r '.metadata.timestamp' target/trivy-vulnerabilities.cdx.json)"
+          echo "Trivy scan timestamp (as generated): $(jq -r '.metadata.timestamp' target/trivy-vulnerabilities.cdx.json)"
+          # Concert also ingests this file as a CycloneDX SBOM and fails it with
+          # "a newer SBOM already exists for this entity" unless metadata.timestamp is
+          # newer than the package SBOM's. Only that one value is refreshed (to the
+          # current UTC time, after bom.json was written); the structure is untouched.
+          jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '.metadata.timestamp = $ts' \
+            target/trivy-vulnerabilities.cdx.json > target/trivy.tmp
+          mv target/trivy.tmp target/trivy-vulnerabilities.cdx.json
+          echo "Trivy scan timestamp (uploaded):     $(jq -r '.metadata.timestamp' target/trivy-vulnerabilities.cdx.json)"
           echo "Top-level keys: $(jq -c 'keys' target/trivy-vulnerabilities.cdx.json)"
           echo "Vulnerabilities found: $(jq '(.vulnerabilities // []) | length' target/trivy-vulnerabilities.cdx.json)"
           jq -r '(.vulnerabilities // [])[] | "\(.id) \(.affects[0].ref // "")"' target/trivy-vulnerabilities.cdx.json | head -n 20
