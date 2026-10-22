@@ -129,6 +129,13 @@ jobs:
           set -euo pipefail
 
           : "${CONCERT_API_KEY:?Secret CONCERT_API_KEY is not set}"
+
+          # Strip stray whitespace / CR / newline pasted with the secret.
+          CONCERT_API_KEY=$(printf '%s' "${CONCERT_API_KEY}" | tr -d '\r\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          case "${CONCERT_API_KEY}" in
+            "C_API_KEY "*|"ZenApiKey "*) ;;
+            *) echo "::warning::CONCERT_API_KEY should start with 'C_API_KEY ' (or 'ZenApiKey ' on OpenShift) followed by the key." ;;
+          esac
           : "${CONCERT_URL:?CONCERT_HOSTNAME is not set. Add it under Settings > Secrets and variables > Actions > Variables (e.g. https://<host>:12443)}"
 
           [ "${API_PREFIX}" = "none" ] && API_PREFIX=""
