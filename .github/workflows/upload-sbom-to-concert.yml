@@ -1,0 +1,193 @@
+name: Upload credit-app SBOM to Concert
+
+# Generates a CycloneDX package SBOM and a ConcertDef application SBOM for
+# app/credit-app and uploads both to IBM Concert 3.x through the ingestion API:
+#   POST {CONCERT_HOSTNAME}/ingestion/api/v1/upload_files
+# Docs: https://www.ibm.com/docs/en/concert/3.1.x?topic=api-uploading-data-through
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'app/credit-app/pom.xml'
+      - 'app/credit-app/src/**'
+      - '.github/workflows/upload-sbom-to-concert.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: concert-sbom-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APP_DIR: app/credit-app
+  APP_NAME: credit-app
+  # Pinned: the plugin is invoked by full coordinates, so pom.xml is not modified.
+  CYCLONEDX_MAVEN_PLUGIN: org.cyclonedx:cyclonedx-maven-plugin:2.9.3
+
+jobs:
+  upload-sbom:
+    name: Generate and upload SBOM
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+          cache: maven
+
+      - name: Generate CycloneDX package SBOM
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          # Concert supports CycloneDX 1.6 or older.
+          mvn -B -ntp "${CYCLONEDX_MAVEN_PLUGIN}:makeBom" \
+            -DschemaVersion=1.6 \
+            -DoutputFormat=json \
+            -DoutputName=bom \
+            -DincludeTestScope=false
+          test -s target/bom.json
+          echo "Components in package SBOM: $(jq '.components | length' target/bom.json)"
+
+      - name: Generate ConcertDef application SBOM
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          APP_VERSION=$(mvn -B -q -ntp -DforceStdout help:evaluate -Dexpression=project.version)
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          # ConcertDef 2.0.0 application SBOM. It must list ALL components of the
+          # application version; the code component purl must equal the repo_url
+          # sent with the package SBOM so Concert can correlate them.
+          jq -n \
+            --arg name "${APP_NAME}" \
+            --arg version "${APP_VERSION}" \
+            --arg now "${NOW}" \
+            --arg build "${GITHUB_RUN_NUMBER}" \
+            --arg repo_url "${REPO_URL}" \
+            --arg branch "${BRANCH}" \
+            '{
+              bomFormat: "ConcertDef",
+              specVersion: "2.0.0",
+              metadata: {
+                timestamp: $now,
+                type: "application",
+                "application-name": $name,
+                "application-version": $version,
+                description: "Credit reporting application",
+                "build-number": $build,
+                "build-timestamp": $now
+              },
+              components: [
+                {
+                  "bom-ref": ("component:" + $name),
+                  type: "component",
+                  name: $name,
+                  components: [
+                    {
+                      "bom-ref": ("code:" + $name),
+                      type: "code",
+                      name: $name,
+                      purl: $repo_url,
+                      branch: $branch
+                    }
+                  ]
+                }
+              ]
+            }' > target/concertdef-application-sbom.json
+
+          echo "Application: ${APP_NAME} ${APP_VERSION}"
+
+      - name: Upload SBOMs to Concert
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          # Secret value includes the key type, e.g. "C_API_KEY <key>".
+          # For OpenShift deployments use "ZenApiKey <key>".
+          CONCERT_API_KEY: ${{ secrets.CONCERT_API_KEY }}
+          INSTANCE_ID: ${{ secrets.CONCERT_INSTANCE_ID || vars.CONCERT_INSTANCE_ID || '0000-0000-0000-0000' }}
+          CONCERT_URL: ${{ vars.CONCERT_HOSTNAME }}
+          # Set the repository variable CONCERT_INSECURE_TLS=true only for
+          # instances that use a self-signed certificate.
+          INSECURE_TLS: ${{ vars.CONCERT_INSECURE_TLS }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          : "${CONCERT_API_KEY:?Secret CONCERT_API_KEY is not set}"
+          : "${CONCERT_URL:?Variable CONCERT_HOSTNAME is not set}"
+
+          CURL_TLS=()
+          if [ "${INSECURE_TLS:-}" = "true" ]; then
+            CURL_TLS=(-k)
+          fi
+
+          upload() {
+            local data_type="$1" file="$2" metadata="${3:-}"
+            local args=(
+              --silent --show-error "${CURL_TLS[@]}"
+              --request POST
+              --url "${CONCERT_URL%/}/ingestion/api/v1/upload_files"
+              --header "accept: application/json"
+              --header "InstanceId: ${INSTANCE_ID}"
+              --header "Authorization: ${CONCERT_API_KEY}"
+              --form "data_type=${data_type}"
+              --form "filename=@${file}"
+              --output response.json
+              --write-out "%{http_code}"
+            )
+            if [ -n "${metadata}" ]; then
+              args+=(--form "metadata=${metadata}")
+            fi
+
+            echo "Uploading ${file} as ${data_type}..."
+            local status
+            status=$(curl "${args[@]}")
+            echo "HTTP ${status}: $(cat response.json)"
+            if [ "${status}" -lt 200 ] || [ "${status}" -ge 300 ]; then
+              echo "::error::Concert upload of ${file} (${data_type}) failed with HTTP ${status}"
+              return 1
+            fi
+          }
+
+          # 1. Define / update the application (ConcertDef SBOMs use data_type=application_sbom).
+          upload application_sbom target/concertdef-application-sbom.json
+
+          # 2. Upload the CycloneDX package SBOM. Source SBOMs require repo_url and repo_name.
+          METADATA=$(jq -nc \
+            --arg repo_url "${REPO_URL}" \
+            --arg repo_name "${APP_NAME}" \
+            --arg branch "${BRANCH}" \
+            '{repo_url: $repo_url, repo_name: $repo_name, branch_name: $branch}')
+          upload package_sbom target/bom.json "${METADATA}"
+
+      - name: Keep SBOMs as build artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: credit-app-sboms
+          path: |
+            ${{ env.APP_DIR }}/target/bom.json
+            ${{ env.APP_DIR }}/target/concertdef-application-sbom.json
+          if-no-files-found: warn
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Concert SBOM upload"
+            echo ""
+            echo "- **Application**: ${APP_NAME}"
+            echo "- **Commit**: ${{ github.sha }}"
+            echo "- **Branch**: ${{ github.ref_name }}"
+            echo "- **Result**: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"

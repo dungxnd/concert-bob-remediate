@@ -143,6 +143,16 @@ To re-introduce vulnerabilities for the credit-app, use `pom-vuln.xml`
 cp pom-vuln.xml pom.xml
 ```
 
+### Upload credit-app SBOM to Concert
+The `Upload credit-app SBOM to Concert` workflow (`.github/workflows/upload-sbom-to-concert.yml`) runs on pushes to `main` that change `app/credit-app/pom.xml` or `app/credit-app/src/**`, and on manual dispatch. It:
+
+1. Generates a CycloneDX 1.6 package SBOM with `cyclonedx-maven-plugin` (no change to `pom.xml`).
+2. Generates a ConcertDef 2.0.0 application SBOM (`credit-app`, version read from the POM, code component = this repository and branch).
+3. Uploads both to `POST {CONCERT_HOSTNAME}/ingestion/api/v1/upload_files` as `application_sbom` and `package_sbom` (metadata: `repo_url`, `repo_name`, `branch_name`).
+
+It uses the existing `CONCERT_API_KEY` secret and `CONCERT_HOSTNAME` / `CONCERT_INSTANCE_ID` settings. Optionally set the variable `CONCERT_INSECURE_TLS=true` if the Concert instance uses a self-signed certificate. For OpenShift deployments the `CONCERT_API_KEY` value must start with `ZenApiKey` instead of `C_API_KEY`.
+
+
 
 ### Bob shell
 For development purposes, Bob shell is currently installed on the Github Actions runner when the Github Action is triggered, followed by the configuration of Github MCP server. The custom 'devops-concert-shell-v2' mode is also configured in the `.bob` directory in the repository. 
