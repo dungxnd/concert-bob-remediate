@@ -57,6 +57,14 @@ jobs:
             -DoutputName=bom \
             -DincludeTestScope=false
           test -s target/bom.json
+
+          # Concert registers a repository URL under one name only (here the GitHub
+          # repository name). The plugin names the root component after the Maven
+          # artifactId (credit-app), so rename it to match the registered name.
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          jq --arg n "${REPO_NAME}" '.metadata.component.name = $n' target/bom.json > target/bom.tmp
+          mv target/bom.tmp target/bom.json
+          echo "Root component: $(jq -c '.metadata.component | {type, name, version}' target/bom.json)"
           echo "Components in package SBOM: $(jq '.components | length' target/bom.json)"
 
       - name: Generate ConcertDef application SBOM
