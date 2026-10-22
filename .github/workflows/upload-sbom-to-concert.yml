@@ -47,9 +47,12 @@ jobs:
       - name: Generate CycloneDX package SBOM
         working-directory: ${{ env.APP_DIR }}
         run: |
-          # Concert supports CycloneDX 1.6 or older.
+          # Concert supports CycloneDX 1.6 or older. For source code repositories it
+          # only accepts a root component of type "application" or "file"; the
+          # plugin default is "library", which Concert rejects.
           mvn -B -ntp "${CYCLONEDX_MAVEN_PLUGIN}:makeBom" \
             -DschemaVersion=1.6 \
+            -DprojectType=application \
             -DoutputFormat=json \
             -DoutputName=bom \
             -DincludeTestScope=false
@@ -62,6 +65,9 @@ jobs:
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
           BRANCH: ${{ github.ref_name }}
         run: |
+          # Concert keeps one name per repository URL, and this repo is already
+          # registered under its repository name, so the code component must use it.
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
           APP_VERSION=$(mvn -B -q -ntp -DforceStdout help:evaluate -Dexpression=project.version)
           NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
@@ -74,6 +80,7 @@ jobs:
             --arg now "${NOW}" \
             --arg build "${GITHUB_RUN_NUMBER}" \
             --arg repo_url "${REPO_URL}" \
+            --arg repo_name "${REPO_NAME}" \
             --arg branch "${BRANCH}" \
             '{
               bomFormat: "ConcertDef",
@@ -94,9 +101,9 @@ jobs:
                   name: $name,
                   components: [
                     {
-                      "bom-ref": ("code:" + $name),
+                      "bom-ref": ("code:" + $repo_name),
                       type: "code",
-                      name: $name,
+                      name: $repo_name,
                       purl: $repo_url,
                       branch: $branch
                     }
@@ -180,7 +187,7 @@ jobs:
           # 2. Upload the CycloneDX package SBOM. Source SBOMs require repo_url and repo_name.
           METADATA=$(jq -nc \
             --arg repo_url "${REPO_URL}" \
-            --arg repo_name "${APP_NAME}" \
+            --arg repo_name "${GITHUB_REPOSITORY#*/}" \
             --arg branch "${BRANCH}" \
             '{repo_url: $repo_url, repo_name: $repo_name, branch_name: $branch}')
           upload package_sbom target/bom.json "${METADATA}"
