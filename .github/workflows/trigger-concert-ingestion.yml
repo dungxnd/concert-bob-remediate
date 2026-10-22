@@ -1,9 +1,10 @@
 name: Trigger Concert Ingestion Job
 
 on:
-  push:
-    branches:
-      - main
+  # Automatic run on push to main is paused: the source_control_discovery_job
+  # creates repositories/packages outside any application (placeholder app in
+  # Concert). SBOM upload is handled by upload-sbom-to-concert.yml instead.
+  # Re-add the "push" trigger to resume.
   workflow_dispatch:
 
 jobs:
