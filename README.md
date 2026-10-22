@@ -155,7 +155,19 @@ The `Upload credit-app SBOM to Concert` workflow (`.github/workflows/upload-sbom
 
 It uses the existing `CONCERT_API_KEY` secret and `CONCERT_HOSTNAME` / `CONCERT_INSTANCE_ID` settings. TLS verification is skipped by default (self-signed certificate); set the variable `CONCERT_INSECURE_TLS=false` to enforce it. For OpenShift deployments the `CONCERT_API_KEY` value must start with `ZenApiKey` instead of `C_API_KEY`.
 
+#### Let Concert open the GitHub issue that starts Bob Shell
+The `Bob Shell V2` workflow (`.github/workflows/bob-shell-v2.yml`) starts when an issue receives the label `cve-remediation`. Concert can create that issue itself with an automation rule ([IBM docs](https://www.ibm.com/docs/en/SSQNYH_3.1.x/doc/automation_rule_cve_tracking.html)). Both parts are configured in the Concert UI:
 
+1. **Connection**: Administration > Integrations > Connections. Integration type `GitHub`, with a personal access token that has write access to this repository's issues.
+2. **Automation rule**: Administration > Integrations > Automation rules > Create automation rule.
+   - Condition: `CVE tracking`, applied to the application `credit-app`.
+   - Action: `Open a GitHub issue`, with this repository's organization and name.
+   - Using this connection: the connection from step 1.
+   - Assign to: a GitHub user with access to the repository.
+   - Labels: `cve-remediation` (use the refresh icon to load existing labels, so create the label in the repository first).
+   - Threshold: the minimum IBM risk score, CVSS score or priority that should trigger an issue.
+
+Concert creates one issue per CVE group (CVEs on the same package are grouped) once the CVEs have been ingested for `credit-app` by the upload workflow above.
 
 ### Bob shell
 For development purposes, Bob shell is currently installed on the Github Actions runner when the Github Action is triggered, followed by the configuration of Github MCP server. The custom 'devops-concert-shell-v2' mode is also configured in the `.bob` directory in the repository. 

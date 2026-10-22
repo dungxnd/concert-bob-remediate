@@ -151,6 +151,8 @@ jobs:
           trivy sbom --scanners vuln --format cyclonedx \
             --output target/trivy-vulnerabilities.cdx.json target/bom.json
           test -s target/trivy-vulnerabilities.cdx.json
+          echo "Package SBOM timestamp: $(jq -r '.metadata.timestamp' target/bom.json)"
+          echo "Trivy scan timestamp:   $(jq -r '.metadata.timestamp' target/trivy-vulnerabilities.cdx.json)"
           echo "Top-level keys: $(jq -c 'keys' target/trivy-vulnerabilities.cdx.json)"
           echo "Vulnerabilities found: $(jq '(.vulnerabilities // []) | length' target/trivy-vulnerabilities.cdx.json)"
           jq -r '(.vulnerabilities // [])[] | "\(.id) \(.affects[0].ref // "")"' target/trivy-vulnerabilities.cdx.json | head -n 20

@@ -136,7 +136,7 @@ runs:
         FAILED=false
 
         # Build Bob Shell command with optional chat mode
-        BOB_CMD="bob --auth-method=api-key --accept-license --yolo"
+        BOB_CMD="bob --auth-method api-key --accept-license --yolo"
         if [[ -n "${CHAT_MODE:-}" ]]; then
           BOB_CMD="${BOB_CMD} --chat-mode=${CHAT_MODE}"
           echo "Using chat mode: ${CHAT_MODE}"
